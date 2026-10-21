@@ -27,6 +27,9 @@
         </div>
 
         <nav class="nav-links">
+            <button type="button" class="btn-ai-header" onclick="toggleAIChat()">
+                <i class="fas fa-robot"></i> AI Meal Planner
+            </button>
             {% if session.get('role') == 'Parent' %}
             <a href="{{ url_for('order_history') }}" class="btn-nav">Orders</a>
             {% else %}
@@ -115,13 +118,97 @@
         </div>
     </div>
 
+    <!-- AI Planner Drawer / Modal -->
+    <div class="ai-chat-drawer" id="aiChatDrawer">
+        <div class="ai-chat-header">
+            <div class="ai-chat-title-group">
+                <div class="ai-avatar"><i class="fas fa-robot"></i></div>
+                <div>
+                    <h3>Compass AI Planner</h3>
+                    <div class="ai-chat-status">
+                        <span class="ai-status-indicator"></span>
+                        <span>Gemini AI • Active Canteen Menu</span>
+                    </div>
+                </div>
+            </div>
+            <button class="ai-close-btn" onclick="toggleAIChat()" title="Close">×</button>
+        </div>
+
+        <div class="ai-quick-controls">
+            <div class="ai-budget-row">
+                <span class="ai-budget-label">Weekly Budget:</span>
+                <div class="ai-budget-input-wrapper">
+                    <span class="ai-currency-symbol">₹</span>
+                    <input type="number" id="aiWeeklyBudgetInput" class="ai-budget-input" placeholder="e.g. 700" min="50" step="10">
+                </div>
+                <button class="ai-btn-plan-quick" onclick="handleQuickPlanClick()">Plan Week</button>
+            </div>
+            <div class="ai-chips-row">
+                <span style="font-size: 0.72rem; color: #7f8c8d; font-weight: 600;">Presets:</span>
+                <span class="ai-chip" onclick="selectBudgetPreset(500)">₹500</span>
+                <span class="ai-chip" onclick="selectBudgetPreset(750)">₹750</span>
+                <span class="ai-chip" onclick="selectBudgetPreset(1000)">₹1000</span>
+                <span class="ai-chip" onclick="togglePromptChip('High Protein')">🍗 High Protein</span>
+                <span class="ai-chip" onclick="togglePromptChip('Pure Vegetarian')">🥗 Pure Veg</span>
+                <span class="ai-chip" onclick="togglePromptChip('Low Calorie')">⚡ Low Calorie</span>
+            </div>
+        </div>
+
+        <div class="ai-chat-messages" id="aiChatMessages">
+            <div class="chat-msg assistant">
+                <div class="chat-msg-avatar"><i class="fas fa-robot"></i></div>
+                <div class="chat-bubble">
+                    <strong>Hi there! 👋 I'm Compass AI.</strong><br>
+                    Enter your weekly budget above and any food preferences (e.g., <em>pure veg, high protein, light food, momos</em>).<br><br>
+                    I will create a balanced <strong>7-day meal plan (1 item per day)</strong> strictly within your budget from the official canteen menu, calculate your <strong>weekly health score</strong>, and show complete nutritional macros!
+                </div>
+            </div>
+        </div>
+
+        <div class="ai-chat-input-area">
+            <input type="text" id="aiChatInput" class="ai-chat-input" placeholder="Type prompt (e.g. '₹600 budget, high protein veg')..." onkeydown="if(event.key==='Enter') sendAIChatMessage()">
+            <button class="ai-send-btn" onclick="sendAIChatMessage()" title="Send">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Floating AI Button Trigger -->
+    <button class="ai-floating-trigger" id="aiFloatingTrigger" onclick="toggleAIChat()" title="AI Weekly Meal Planner">
+        <span class="ai-sparkle-dot"></span>
+        <i class="fas fa-robot"></i>
+        <span>AI Meal Planner</span>
+    </button>
+
+
     <script>
         // Store user ID check if needed, but session storage works locally
+
+        function toggleAIChat() {
+            if (document.getElementById('ordersSidebar').classList.contains('open')) toggleOrders();
+            if (document.getElementById('reviewsSidebar').classList.contains('open')) toggleReviews();
+            if (document.getElementById('cartSidebar').classList.contains('open')) toggleCart();
+
+            const drawer = document.getElementById('aiChatDrawer');
+            if (!drawer) return;
+            const isOpen = drawer.classList.contains('open');
+            if (isOpen) {
+                drawer.classList.remove('open');
+            } else {
+                drawer.classList.add('open');
+                setTimeout(() => {
+                    const input = document.getElementById('aiChatInput');
+                    if (input) input.focus();
+                }, 300);
+            }
+        }
 
         function toggleCart() {
             // Close others
             if (document.getElementById('ordersSidebar').classList.contains('open')) toggleOrders();
             if (document.getElementById('reviewsSidebar').classList.contains('open')) toggleReviews();
+            const aiDrawer = document.getElementById('aiChatDrawer');
+            if (aiDrawer && aiDrawer.classList.contains('open')) aiDrawer.classList.remove('open');
 
             const sidebar = document.getElementById('cartSidebar');
             const overlay = document.getElementById('cartOverlay');
@@ -136,6 +223,8 @@
             // Close others
             if (document.getElementById('cartSidebar').classList.contains('open')) toggleCart();
             if (document.getElementById('reviewsSidebar').classList.contains('open')) toggleReviews();
+            const aiDrawer = document.getElementById('aiChatDrawer');
+            if (aiDrawer && aiDrawer.classList.contains('open')) aiDrawer.classList.remove('open');
 
             const sidebar = document.getElementById('ordersSidebar');
             const overlay = document.getElementById('cartOverlay');
@@ -143,7 +232,6 @@
             if (!document.querySelector('.cart-sidebar.open')) {
                 overlay.classList.toggle('open');
             } else if (sidebar.classList.contains('open')) {
-                // Closing this one, check if overlay needs to close (handled by general logic usually but let's be safe)
                 overlay.classList.remove('open');
             } else {
                 overlay.classList.add('open');
@@ -159,6 +247,8 @@
             // Close others
             if (document.getElementById('cartSidebar').classList.contains('open')) toggleCart();
             if (document.getElementById('ordersSidebar').classList.contains('open')) toggleOrders();
+            const aiDrawer = document.getElementById('aiChatDrawer');
+            if (aiDrawer && aiDrawer.classList.contains('open')) aiDrawer.classList.remove('open');
 
             const sidebar = document.getElementById('reviewsSidebar');
             const overlay = document.getElementById('cartOverlay');
@@ -181,13 +271,18 @@
         document.getElementById('cartOverlay').addEventListener('click', () => {
             document.querySelectorAll('.cart-sidebar.open').forEach(s => s.classList.remove('open'));
             document.getElementById('cartOverlay').classList.remove('open');
+            const aiDrawer = document.getElementById('aiChatDrawer');
+            if (aiDrawer) aiDrawer.classList.remove('open');
         });
 
         // Update Cart Icon Click to open sidebar
-        document.querySelector('.cart-icon').addEventListener('click', (e) => {
-            e.preventDefault();
-            toggleCart();
-        });
+        const cartIcon = document.querySelector('.cart-icon');
+        if (cartIcon) {
+            cartIcon.addEventListener('click', (e) => {
+                e.preventDefault();
+                toggleCart();
+            });
+        }
 
         // Update Links Logic
         document.addEventListener('DOMContentLoaded', () => {
@@ -424,7 +519,318 @@
                 });
         }
 
+        // ==========================================
+        // COMPASS AI MEAL PLANNER CLIENT-SIDE LOGIC
+        // ==========================================
+        let aiChatHistory = [];
+        let lastGeneratedPlan = null;
+
+        function selectBudgetPreset(amount) {
+            const input = document.getElementById('aiWeeklyBudgetInput');
+            if (input) {
+                input.value = amount;
+                input.focus();
+            }
+            document.querySelectorAll('.ai-chip').forEach(c => {
+                if (c.innerText.includes('₹' + amount)) c.classList.add('active');
+                else if (c.innerText.includes('₹')) c.classList.remove('active');
+            });
+        }
+
+        function togglePromptChip(chipText) {
+            const input = document.getElementById('aiChatInput');
+            if (!input) return;
+            if (input.value.includes(chipText)) {
+                input.value = input.value.replace(chipText, '').trim();
+            } else {
+                input.value = (input.value ? input.value + ', ' : '') + chipText;
+            }
+            input.focus();
+        }
+
+        function handleQuickPlanClick() {
+            const budgetVal = document.getElementById('aiWeeklyBudgetInput').value;
+            const inputMsg = document.getElementById('aiChatInput').value.trim();
+            if (!budgetVal && !inputMsg) {
+                alert('Please enter your weekly budget (e.g. 700)!');
+                return;
+            }
+            const msg = inputMsg || `Please plan my week with a weekly budget of ₹${budgetVal}. Provide 1 food item per day, nutritional values, and health score.`;
+            sendAIChatMessage(msg, budgetVal);
+        }
+
+        function sendAIChatMessage(customMsg, customBudget) {
+            const msgInput = document.getElementById('aiChatInput');
+            const budgetInput = document.getElementById('aiWeeklyBudgetInput');
+            
+            const message = customMsg !== undefined ? customMsg : (msgInput ? msgInput.value.trim() : '');
+            const budget = customBudget !== undefined ? customBudget : (budgetInput ? budgetInput.value.trim() : null);
+
+            if (!message && !budget) {
+                alert('Please type a message or enter your weekly budget.');
+                return;
+            }
+
+            appendUserBubble(message || `Plan for weekly budget: ₹${budget}`);
+            if (msgInput) msgInput.value = '';
+
+            showTypingIndicator();
+
+            fetch('/api/chatbot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: message,
+                    budget: budget ? parseFloat(budget) : null,
+                    history: aiChatHistory
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                removeTypingIndicator();
+                if (!data.success) {
+                    appendAssistantBubble(`⚠️ ${data.message || 'Something went wrong. Please try again.'}`);
+                    return;
+                }
+
+                aiChatHistory.push({ role: 'user', content: message });
+                aiChatHistory.push({ role: 'assistant', content: data.message });
+                if (aiChatHistory.length > 8) aiChatHistory = aiChatHistory.slice(-8);
+
+                renderAIResponse(data);
+            })
+            .catch(err => {
+                removeTypingIndicator();
+                console.error('AI Chat Error:', err);
+                appendAssistantBubble('⚠️ Network error connecting to Compass AI. Please ensure you are connected and try again.');
+            });
+        }
+
+        function appendUserBubble(text) {
+            const container = document.getElementById('aiChatMessages');
+            if (!container) return;
+            const div = document.createElement('div');
+            div.className = 'chat-msg user';
+            div.innerHTML = `
+                <div class="chat-msg-avatar"><i class="fas fa-user"></i></div>
+                <div class="chat-bubble">${escapeHtml(text)}</div>
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function appendAssistantBubble(text) {
+            const container = document.getElementById('aiChatMessages');
+            if (!container) return;
+            const div = document.createElement('div');
+            div.className = 'chat-msg assistant';
+            div.innerHTML = `
+                <div class="chat-msg-avatar"><i class="fas fa-robot"></i></div>
+                <div class="chat-bubble">${escapeHtml(text)}</div>
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function showTypingIndicator() {
+            const container = document.getElementById('aiChatMessages');
+            if (!container) return;
+            const div = document.createElement('div');
+            div.id = 'aiTypingIndicator';
+            div.className = 'chat-msg assistant';
+            div.innerHTML = `
+                <div class="chat-msg-avatar"><i class="fas fa-robot"></i></div>
+                <div class="ai-typing-indicator">
+                    <span class="ai-typing-dot"></span>
+                    <span class="ai-typing-dot"></span>
+                    <span class="ai-typing-dot"></span>
+                </div>
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function removeTypingIndicator() {
+            const el = document.getElementById('aiTypingIndicator');
+            if (el) el.remove();
+        }
+
+        function renderAIResponse(data) {
+            const container = document.getElementById('aiChatMessages');
+            if (!container) return;
+            const metrics = data.plan_metrics;
+            lastGeneratedPlan = metrics;
+
+            let contentHtml = `<p style="margin: 0 0 0.5rem 0;">${escapeHtml(data.message)}</p>`;
+
+            if (metrics && metrics.days && metrics.days.length > 0) {
+                const score = metrics.weekly_health_score;
+                const grade = metrics.grade;
+                contentHtml += `
+                    <div class="ai-health-score-widget">
+                        <div class="ai-score-top">
+                            <span class="ai-score-title"><i class="fas fa-heartbeat"></i> Weekly Health Score</span>
+                            <div>
+                                <span class="ai-score-value">${score}/100</span>
+                                <span class="ai-grade-badge">${escapeHtml(grade)}</span>
+                            </div>
+                        </div>
+                        <div class="ai-score-bar-bg">
+                            <div class="ai-score-bar-fill" style="width: ${score}%;"></div>
+                        </div>
+                    </div>
+                `;
+
+                const budget = metrics.budget;
+                const totalCost = metrics.total_cost;
+                const remaining = metrics.remaining_budget;
+                const isWithin = metrics.is_within_budget;
+
+                contentHtml += `
+                    <div class="ai-budget-banner ${isWithin ? 'within' : 'exceeded'}">
+                        <span><i class="fas ${isWithin ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i> 
+                            ${isWithin ? 'Strictly Within Budget' : 'Budget Exceeded'}
+                        </span>
+                        <strong>Total: ₹${totalCost} ${budget ? '/ ₹' + budget : ''} ${remaining !== null && remaining >= 0 ? '(Saved ₹' + remaining + ')' : ''}</strong>
+                    </div>
+                `;
+
+                contentHtml += `
+                    <div class="ai-nutrition-grid">
+                        <div class="ai-nutri-card">
+                            <div class="ai-nutri-val">${metrics.total_calories}</div>
+                            <div class="ai-nutri-label">Total Cal</div>
+                            <div style="font-size: 0.65rem; color: #888;">~${metrics.avg_daily_calories}/day</div>
+                        </div>
+                        <div class="ai-nutri-card">
+                            <div class="ai-nutri-val">${metrics.total_protein}g</div>
+                            <div class="ai-nutri-label">Protein</div>
+                            <div style="font-size: 0.65rem; color: #888;">~${metrics.avg_daily_protein}g/day</div>
+                        </div>
+                        <div class="ai-nutri-card">
+                            <div class="ai-nutri-val">${metrics.total_carbs}g</div>
+                            <div class="ai-nutri-label">Carbs</div>
+                            <div style="font-size: 0.65rem; color: #888;">~${metrics.avg_daily_carbs}g/day</div>
+                        </div>
+                        <div class="ai-nutri-card">
+                            <div class="ai-nutri-val">${metrics.total_fats}g</div>
+                            <div class="ai-nutri-label">Fats</div>
+                            <div style="font-size: 0.65rem; color: #888;">~${metrics.avg_daily_fats}g/day</div>
+                        </div>
+                    </div>
+                `;
+
+                contentHtml += `<div class="ai-days-container">`;
+                metrics.days.forEach((d) => {
+                    const healthClass = (d.health || 'green').toLowerCase().includes('green') ? 'green' : 
+                                       (d.health || '').toLowerCase().includes('amber') ? 'amber' : 'red';
+                    const healthLabel = healthClass.toUpperCase() + ' CHOICE';
+
+                    contentHtml += `
+                        <div class="ai-day-card">
+                            <div class="ai-day-left">
+                                <div class="ai-day-header-row">
+                                    <span class="ai-day-tag">${escapeHtml(d.day)}</span>
+                                    <span class="ai-health-pill ${healthClass}">${healthLabel}</span>
+                                </div>
+                                <div class="ai-dish-name">${escapeHtml(d.name)}</div>
+                                <div class="ai-dish-meta">
+                                    <span>🔥 ${d.calories} kcal</span>
+                                    <span>• P: ${d.protein}g</span>
+                                    <span>• C: ${d.carbs}g</span>
+                                    <span>• F: ${d.fats}g</span>
+                                </div>
+                                <div style="font-size: 0.73rem; color: #7f8c8d; margin-top: 2px;">
+                                    <em>${escapeHtml(d.reason || '')}</em>
+                                </div>
+                            </div>
+                            <div class="ai-day-right">
+                                <span class="ai-dish-price">₹${d.price}</span>
+                                <button class="ai-add-day-btn" onclick="addToCart(${d.item_id}, '${escapeQuote(d.name)}', ${d.price})">
+                                    + Add
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+                contentHtml += `</div>`;
+
+                contentHtml += `
+                    <button class="ai-bulk-add-btn" id="bulkAddBtn" onclick="addEntirePlanToCart()">
+                        <i class="fas fa-cart-plus"></i> Add Entire Plan to Cart (7 Days • ₹${totalCost})
+                    </button>
+                `;
+            }
+
+            if (data.health_tips && data.health_tips.length > 0) {
+                contentHtml += `<div style="margin-top: 0.85rem; padding: 0.6rem 0.8rem; background: #fffbe6; border-left: 3px solid #f1c40f; border-radius: 4px; font-size: 0.78rem; color: #7f6000;">
+                    <strong>💡 Nutritionist Tips:</strong>
+                    <ul style="margin: 0.3rem 0 0 1rem; padding: 0;">
+                        ${data.health_tips.map(t => `<li>${escapeHtml(t)}</li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+
+            const div = document.createElement('div');
+            div.className = 'chat-msg assistant';
+            div.innerHTML = `
+                <div class="chat-msg-avatar"><i class="fas fa-robot"></i></div>
+                <div class="chat-bubble" style="width: 100%; max-width: 100%;">${contentHtml}</div>
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function addEntirePlanToCart() {
+            if (!lastGeneratedPlan || !lastGeneratedPlan.days) return;
+            let cart = JSON.parse(sessionStorage.getItem('cart')) || [];
+            
+            lastGeneratedPlan.days.forEach(day => {
+                let existing = cart.find(i => i.id == day.item_id);
+                if (existing) {
+                    existing.quantity += 1;
+                } else {
+                    cart.push({
+                        id: day.item_id,
+                        name: day.name,
+                        price: parseFloat(day.price),
+                        quantity: 1
+                    });
+                }
+            });
+
+            sessionStorage.setItem('cart', JSON.stringify(cart));
+            updateCartCount();
+
+            const bulkBtn = document.getElementById('bulkAddBtn');
+            if (bulkBtn) {
+                const originalText = bulkBtn.innerHTML;
+                bulkBtn.innerHTML = '✓ All 7 Meals Added to Cart!';
+                bulkBtn.style.background = '#27ae60';
+                setTimeout(() => {
+                    bulkBtn.innerHTML = originalText;
+                    bulkBtn.style.background = '';
+                }, 2200);
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function escapeQuote(str) {
+            if (!str) return '';
+            return str.replace(/'/g, "\\'");
+        }
+
         window.addEventListener('load', updateCartCount);
+
     </script>
 </body>
 

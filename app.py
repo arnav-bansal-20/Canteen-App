@@ -1,9 +1,15 @@
+import os
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from db import get_db_connection
 import mysql.connector
+from dotenv import load_dotenv
+from ai_planner import generate_meal_plan
+
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'super_secret_key'  # Change for production
+app.secret_key = os.environ.get('SECRET_KEY', 'super_secret_key')
+
 
 @app.route('/')
 def home():
@@ -233,9 +239,39 @@ def add_review():
     conn.close()
     return jsonify({'success': True, 'message': 'Review added!'})
 
+# --- AI MEAL PLANNER CHATBOT API ---
+@app.route('/api/chatbot', methods=['POST'])
+def api_chatbot():
+    data = request.get_json() or {}
+    message = data.get('message', '').strip()
+    budget = data.get('budget')
+    history = data.get('history', [])
+
+    if not message and budget is None:
+        return jsonify({'success': False, 'message': 'Please enter a message or a weekly budget.'}), 400
+
+    try:
+        if budget is not None and str(budget).strip() != '':
+            budget = float(budget)
+        else:
+            budget = None
+    except (ValueError, TypeError):
+        budget = None
+
+    try:
+        result = generate_meal_plan(
+            user_message=message or f"Please create a 7-day meal plan for a weekly budget of ₹{budget}",
+            budget=budget,
+            conversation_history=history
+        )
+        return jsonify(result)
+    except Exception as e:
+        print(f"Chatbot API error: {e}")
+        return jsonify({'success': False, 'message': f"Chatbot error: {str(e)}"}), 500
+
 if __name__ == '__main__':
-    import os
     port = int(os.environ.get('PORT', 5001))
     print(f"Starting canteen app on http://127.0.0.1:{port}")
     app.run(debug=True, port=port)
+
 
