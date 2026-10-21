@@ -1,0 +1,241 @@
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from db import get_db_connection
+import mysql.connector
+
+app = Flask(__name__)
+app.secret_key = 'super_secret_key'  # Change for production
+
+@app.route('/')
+def home():
+    if 'user_id' in session and session.get('role') == 'Student':
+        return redirect(url_for('menu'))
+    elif 'user_id' in session and session.get('role') == 'Parent':
+        return redirect(url_for('order_history'))
+    return redirect(url_for('login'))
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        # Role is NOT asked at registration as per requirement? 
+        # Wait, user said: "role based student/teacher and parent it should ask role only at the time of login not at time of registering the account"
+        # This implies the user account itself doesn't have a fixed role? Or the role is selected during login?
+        # If "ask role only at the time of login", then one account can be potentially anything?
+        # OR, registration just creates a user, and they claim a role at login?
+        # A bit ambiguous. Usually a user HAS a role.
+        # "it should ask role only at the time of login not at time of registering" -> suggests the user picks "I am logging in as a Parent".
+        # But surely the system needs to know if they ARE a parent?
+        # Maybe the user means: "Simpler registration (just user/pass), and at login you say who you are."
+        # If I register as "Arnav", do I choose my role then? User says "not at time of registering".
+        # So I will just store username/password.
+        # At login, they pick a role.
+        # Does this mean I can login as Student one day and Parent another?
+        # I'll implement it such that the `users` table might just store the credentials, and the session stores the role. 
+        # OR, the `users` table *should* have a role, but it's assigned default or inferred?
+        # Re-reading: "ask role only at the time of login not at time of registering values"
+        # I'll follow this strictly: Registration = User/Pass. Login = User/Pass + Role.
+        # If the DB schema *requires* a role (I put NOT NULL), I might need to adjust or set a default.
+        # I'll update schema to remove role from `users` or make it nullable, 
+        # OR I just don't check it against the DB role, just use the selected role for the session logic?
+        # But if a Teacher logs in, they should see teacher stuff.
+        # I will assume for this MVP that the Role is purely a session-context thing or we update the user's role on first login?
+        # Let's simple store it in session.
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            # We'll insert with a default role or NULL if I change schema.
+            # For now, let's just insert 'Student' as placeholder if schema enforces it, or remove column.
+            # My created schema had `role` column.
+            # I will modify schema to remove role if strictly following "not at registering".
+            # Or I'll just set it to 'Student' by default.
+            cursor.execute("INSERT INTO users (username, password_hash, role) VALUES (%s, %s, 'Student')", (username, password))
+            conn.commit()
+            flash('Registration successful! Please login.')
+            return redirect(url_for('login'))
+        except mysql.connector.Error as e:
+            flash(f'Error: {e}')
+        finally:
+            cursor.close()
+            conn.close()
+    return render_template('register.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        role = request.form['role']
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM users WHERE username = %s AND password_hash = %s", (username, password))
+        user = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if user:
+            session['user_id'] = user['id']
+            session['username'] = user['username']
+            session['role'] = role # Trust the user's selection for the session context
+            
+            if role == 'Parent':
+                return redirect(url_for('order_history'))
+            else:
+                return redirect(url_for('menu'))
+        else:
+            flash('Invalid credentials')
+            
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+@app.route('/menu')
+def menu():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    query = request.args.get('q')
+    if query:
+        cursor.execute("SELECT * FROM menu WHERE name LIKE %s", (f"%{query}%",))
+    else:
+        cursor.execute("SELECT * FROM menu")
+        
+    items = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return render_template('menu.html', items=items)
+
+@app.route('/cart')
+def cart():
+    # Helper to view cart (client side storage or session?)
+    # For a real app, maybe session or local storage. 
+    # I'll implement a simple session-based cart or just render the page and let JS handle it.
+    # User asked for "cart in which there should be two option vend reciept and place order"
+    # So I'll render a cart template.
+    if 'user_id' not in session: return redirect(url_for('login'))
+    return render_template('cart.html')
+
+@app.route('/checkout', methods=['POST'])
+def checkout():
+    if 'user_id' not in session: 
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    data = request.get_json()
+    order_type = data.get('type') # 'Vend Receipt' or 'Place Order'
+    cart_items = data.get('items')
+    
+    if not cart_items:
+        return jsonify({'success': False, 'message': 'Cart empty'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Cast to float/int to ensure correct calculation and types
+        total = sum(float(item['price']) * int(item['quantity']) for item in cart_items)
+        
+        cursor.execute("INSERT INTO orders (user_id, total_amount, order_type, status) VALUES (%s, %s, %s, 'Pending')", 
+                       (session['user_id'], total, order_type))
+        order_id = cursor.lastrowid
+        
+        for item in cart_items:
+            cursor.execute("INSERT INTO order_items (order_id, menu_id, quantity, price) VALUES (%s, %s, %s, %s)",
+                           (order_id, item['id'], int(item['quantity']), float(item['price'])))
+            
+        conn.commit()
+        return jsonify({'success': True, 'message': 'Order placed successfully!'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/history')
+def order_history():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT o.id, o.total_amount, o.order_type, o.status, o.created_at,
+               GROUP_CONCAT(CONCAT(m.name, ' x', oi.quantity) SEPARATOR ', ') as ordered_items
+        FROM orders o
+        JOIN order_items oi ON o.id = oi.order_id
+        JOIN menu m ON oi.menu_id = m.id
+        WHERE o.user_id = %s
+        GROUP BY o.id
+        ORDER BY o.created_at DESC
+    """, (session['user_id'],))
+    orders = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return render_template('history.html', orders=orders)
+
+@app.route('/api/history')
+def api_history():
+    if 'user_id' not in session: 
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT o.id, o.total_amount, o.order_type, o.status, o.created_at,
+               GROUP_CONCAT(CONCAT(m.name, ' x', oi.quantity) SEPARATOR ', ') as ordered_items
+        FROM orders o
+        JOIN order_items oi ON o.id = oi.order_id
+        JOIN menu m ON oi.menu_id = m.id
+        WHERE o.user_id = %s
+        GROUP BY o.id
+        ORDER BY o.created_at DESC
+    """, (session['user_id'],))
+    orders = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return jsonify({'success': True, 'orders': orders})
+
+# --- REVIEWS API ---
+@app.route('/api/reviews', methods=['GET'])
+def get_reviews():
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM reviews ORDER BY created_at DESC")
+    reviews = cursor.fetchall()
+    conn.close()
+    return jsonify({'success': True, 'reviews': reviews})
+
+@app.route('/api/reviews', methods=['POST'])
+def add_review():
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+        
+    data = request.get_json()
+    rating = data.get('rating')
+    comment = data.get('comment')
+    
+    if not rating or not comment:
+         return jsonify({'success': False, 'message': 'Missing data'}), 400
+         
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO reviews (user_id, username, rating, comment) VALUES (%s, %s, %s, %s)",
+                   (session['user_id'], session['username'], rating, comment))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'message': 'Review added!'})
+
+if __name__ == '__main__':
+    import os
+    port = int(os.environ.get('PORT', 5001))
+    print(f"Starting canteen app on http://127.0.0.1:{port}")
+    app.run(debug=True, port=port)
+
