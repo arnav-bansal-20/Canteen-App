@@ -1,4 +1,5 @@
 import os
+import json
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from db import get_db_connection
 import mysql.connector
@@ -264,10 +265,105 @@ def api_chatbot():
             budget=budget,
             conversation_history=history
         )
+        
+        # Save generated weekly plan to MySQL if user is logged in
+        user_id = session.get('user_id')
+        if user_id and result.get('success') and result.get('plan_metrics'):
+            try:
+                metrics = result['plan_metrics']
+                plan_json_str = json.dumps(result)
+                db = get_db_connection()
+                if db:
+                    cursor = db.cursor()
+                    cursor.execute("""
+                        INSERT INTO weekly_plans (user_id, budget, total_cost, weekly_health_score, grade, plan_data)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            budget = VALUES(budget),
+                            total_cost = VALUES(total_cost),
+                            weekly_health_score = VALUES(weekly_health_score),
+                            grade = VALUES(grade),
+                            plan_data = VALUES(plan_data),
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (
+                        user_id,
+                        metrics.get('budget'),
+                        metrics.get('total_cost', 0),
+                        metrics.get('weekly_health_score', 0),
+                        metrics.get('grade', ''),
+                        plan_json_str
+                    ))
+                    db.commit()
+                    cursor.close()
+                    db.close()
+                    result['saved'] = True
+            except Exception as save_err:
+                print(f"Error saving weekly plan: {save_err}")
+                result['saved'] = False
+
         return jsonify(result)
     except Exception as e:
         print(f"Chatbot API error: {e}")
         return jsonify({'success': False, 'message': f"Chatbot error: {str(e)}"}), 500
+
+
+@app.route('/api/meal-plan', methods=['GET'])
+def get_saved_meal_plan():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'success': False, 'message': 'User not logged in', 'plan': None})
+
+    try:
+        db = get_db_connection()
+        if not db:
+            return jsonify({'success': False, 'message': 'Database connection error', 'plan': None}), 500
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, user_id, budget, total_cost, weekly_health_score, grade, plan_data, updated_at FROM weekly_plans WHERE user_id = %s", (user_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        db.close()
+
+        if not row:
+            return jsonify({'success': True, 'plan': None})
+
+        plan_data = row['plan_data']
+        if isinstance(plan_data, str):
+            plan_data = json.loads(plan_data)
+
+        updated_at_str = row['updated_at'].strftime('%b %d, %Y at %I:%M %p') if row.get('updated_at') else None
+
+        return jsonify({
+            'success': True,
+            'plan': plan_data,
+            'updated_at': updated_at_str,
+            'weekly_health_score': row.get('weekly_health_score'),
+            'total_cost': float(row.get('total_cost', 0))
+        })
+    except Exception as e:
+        print(f"Error fetching saved meal plan: {e}")
+        return jsonify({'success': False, 'message': str(e), 'plan': None}), 500
+
+
+@app.route('/api/meal-plan', methods=['DELETE'])
+def clear_saved_meal_plan():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'success': False, 'message': 'User not logged in'}), 401
+
+    try:
+        db = get_db_connection()
+        if not db:
+            return jsonify({'success': False, 'message': 'Database connection error'}), 500
+        cursor = db.cursor()
+        cursor.execute("DELETE FROM weekly_plans WHERE user_id = %s", (user_id,))
+        db.commit()
+        cursor.close()
+        db.close()
+        return jsonify({'success': True, 'message': 'Weekly meal plan cleared successfully.'})
+    except Exception as e:
+        print(f"Error clearing saved meal plan: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))

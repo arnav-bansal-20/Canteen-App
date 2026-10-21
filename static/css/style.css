@@ -1148,5 +1148,78 @@ th {
     40% { transform: translateY(-5px); }
 }
 
+/* Saved Plan Indicators & Controls */
+.ai-saved-plan-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #e8f8f5;
+    border: 1px solid #a3e4d7;
+    border-radius: 10px;
+    padding: 0.55rem 0.85rem;
+    margin-bottom: 0.65rem;
+}
+
+.ai-saved-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #117864;
+}
+
+.ai-saved-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.72rem;
+    color: #555;
+}
+
+.ai-btn-clear-plan {
+    background: #ffffff;
+    border: 1px solid #f5b7b1;
+    color: #c0392b;
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.ai-btn-clear-plan:hover {
+    background: #fdf2e9;
+    border-color: #e74c3c;
+}
+
+.ai-plan-status-note {
+    margin-top: 0.75rem;
+    padding: 0.6rem 0.8rem;
+    background: #f8f9fa;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    color: #555;
+    line-height: 1.45;
+}
+
+.ai-saved-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: #d4edda;
+    color: #155724;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    margin-left: 0.4rem;
+}
+
 
 

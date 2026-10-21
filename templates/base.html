@@ -174,6 +174,8 @@
     <script>
         // Store user ID check if needed, but session storage works locally
 
+        let hasCheckedSavedPlan = false;
+
         function toggleAIChat() {
             if (document.getElementById('ordersSidebar').classList.contains('open')) toggleOrders();
             if (document.getElementById('reviewsSidebar').classList.contains('open')) toggleReviews();
@@ -186,6 +188,9 @@
                 drawer.classList.remove('open');
             } else {
                 drawer.classList.add('open');
+                if (!hasCheckedSavedPlan) {
+                    loadSavedMealPlan();
+                }
                 setTimeout(() => {
                     const input = document.getElementById('aiChatInput');
                     if (input) input.focus();
@@ -645,13 +650,99 @@
             if (el) el.remove();
         }
 
-        function renderAIResponse(data) {
+        function loadSavedMealPlan() {
+            hasCheckedSavedPlan = true;
+            fetch('/api/meal-plan')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success && data.plan && data.plan.plan_metrics) {
+                        displaySavedMealPlan(data.plan, data.updated_at);
+                    }
+                })
+                .catch(err => {
+                    console.log('Error checking saved plan:', err);
+                });
+        }
+
+        function displaySavedMealPlan(planData, updatedAt) {
+            const container = document.getElementById('aiChatMessages');
+            if (!container) return;
+            container.innerHTML = '';
+
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'ai-saved-plan-header';
+            headerDiv.innerHTML = `
+                <div class="ai-saved-badge">
+                    <i class="fas fa-bookmark"></i> Active 5-Day Plan (Monday – Friday)
+                </div>
+                <div class="ai-saved-meta">
+                    <span>${updatedAt ? 'Saved: ' + escapeHtml(updatedAt) : 'Saved to Account'}</span>
+                    <button class="ai-btn-clear-plan" onclick="clearSavedMealPlan()" title="Delete saved plan">
+                        <i class="fas fa-trash-alt"></i> Clear
+                    </button>
+                </div>
+            `;
+            container.appendChild(headerDiv);
+
+            renderAIResponse(planData, true, updatedAt);
+        }
+
+        function clearSavedMealPlan() {
+            if (!confirm('Are you sure you want to remove your saved weekly plan?')) {
+                return;
+            }
+
+            fetch('/api/meal-plan', { method: 'DELETE' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        lastGeneratedPlan = null;
+                        const container = document.getElementById('aiChatMessages');
+                        if (container) {
+                            container.innerHTML = `
+                                <div class="chat-msg assistant">
+                                    <div class="chat-msg-avatar"><i class="fas fa-robot"></i></div>
+                                    <div class="chat-bubble">
+                                        <strong>Plan cleared!</strong><br>
+                                        Your previous weekly meal plan has been removed. You can enter a new weekly budget above or type your meal preferences below to plan a new week!
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    } else {
+                        alert(data.message || 'Failed to clear meal plan');
+                    }
+                })
+                .catch(err => {
+                    console.error('Error clearing plan:', err);
+                    alert('Error clearing saved plan.');
+                });
+        }
+
+        function renderAIResponse(data, isSavedView, updatedAt) {
             const container = document.getElementById('aiChatMessages');
             if (!container) return;
             const metrics = data.plan_metrics;
             lastGeneratedPlan = metrics;
 
-            let contentHtml = `<p style="margin: 0 0 0.5rem 0;">${escapeHtml(data.message)}</p>`;
+            let contentHtml = '';
+            
+            if (isSavedView) {
+                contentHtml += `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem;">
+                        <span style="font-weight: 700; color: #2c3e50;">Active Weekly Plan</span>
+                        <span class="ai-saved-tag"><i class="fas fa-check-circle"></i> Saved in Database</span>
+                    </div>
+                `;
+            } else if (data.saved) {
+                contentHtml += `
+                    <div style="margin-bottom: 0.6rem;">
+                        <span class="ai-saved-tag"><i class="fas fa-check-circle"></i> Saved to your account for the week!</span>
+                    </div>
+                `;
+            }
+
+            contentHtml += `<p style="margin: 0 0 0.5rem 0;">${escapeHtml(data.message)}</p>`;
 
             if (metrics && metrics.days && metrics.days.length > 0) {
                 const score = metrics.weekly_health_score;
@@ -760,6 +851,12 @@
                     </ul>
                 </div>`;
             }
+
+            contentHtml += `
+                <div class="ai-plan-status-note">
+                    <span>📌 <strong>Your weekly plan is saved!</strong> You don't need to generate a new plan everyday. Simply click <strong>"+ Add"</strong> on each day or <strong>"Add Entire Plan to Cart"</strong> when you are ready to order.</span>
+                </div>
+            `;
 
             const div = document.createElement('div');
             div.className = 'chat-msg assistant';
