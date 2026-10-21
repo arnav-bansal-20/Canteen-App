@@ -649,23 +649,8 @@ th {
     color: #ffffff;
 }
 
-.ai-chat-status {
-    font-size: 0.75rem;
-    color: #55efc4;
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-}
-
-.ai-status-indicator {
-    width: 6px;
-    height: 6px;
-    background: #55efc4;
-    border-radius: 50%;
-    display: inline-block;
-}
-
 .ai-close-btn {
+
     background: rgba(255, 255, 255, 0.15);
     border: none;
     color: #ffffff;
