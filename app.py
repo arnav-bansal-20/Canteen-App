@@ -260,7 +260,7 @@ def api_chatbot():
 
     try:
         result = generate_meal_plan(
-            user_message=message or f"Please create a 7-day meal plan for a weekly budget of ₹{budget}",
+            user_message=message or f"Please create a 5-day meal plan (Monday to Friday) for a weekly budget of ₹{budget}",
             budget=budget,
             conversation_history=history
         )

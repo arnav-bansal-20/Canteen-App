@@ -160,7 +160,7 @@
                 <div class="chat-bubble">
                     <strong>Hi there! 👋 I'm Compass AI.</strong><br>
                     Enter your weekly budget above and any food preferences (e.g., <em>pure veg, high protein, light food, momos</em>).<br><br>
-                    I will create a balanced <strong>7-day meal plan (1 item per day)</strong> strictly within your budget from the official canteen menu, calculate your <strong>weekly health score</strong>, and show complete nutritional macros!
+                    I will create a balanced <strong>5-day meal plan (Monday to Friday, 1 item per day)</strong> strictly within your budget from the official canteen menu, calculate your <strong>weekly health score</strong>, and show complete nutritional macros!
                 </div>
             </div>
         </div>
@@ -555,7 +555,7 @@
                 alert('Please enter your weekly budget (e.g. 700)!');
                 return;
             }
-            const msg = inputMsg || `Please plan my week with a weekly budget of ₹${budgetVal}. Provide 1 food item per day, nutritional values, and health score.`;
+            const msg = inputMsg || `Please plan my 5-day week (Monday to Friday) with a weekly budget of ₹${budgetVal}. Provide 1 food item per day, nutritional values, and health score.`;
             sendAIChatMessage(msg, budgetVal);
         }
 
@@ -757,7 +757,7 @@
 
                 contentHtml += `
                     <button class="ai-bulk-add-btn" id="bulkAddBtn" onclick="addEntirePlanToCart()">
-                        <i class="fas fa-cart-plus"></i> Add Entire Plan to Cart (7 Days • ₹${totalCost})
+                        <i class="fas fa-cart-plus"></i> Add Entire Plan to Cart (${metrics.days.length} Days • ₹${totalCost})
                     </button>
                 `;
             }
@@ -805,7 +805,7 @@
             const bulkBtn = document.getElementById('bulkAddBtn');
             if (bulkBtn) {
                 const originalText = bulkBtn.innerHTML;
-                bulkBtn.innerHTML = '✓ All 7 Meals Added to Cart!';
+                bulkBtn.innerHTML = `✓ All ${lastGeneratedPlan.days.length} Meals Added to Cart!`;
                 bulkBtn.style.background = '#27ae60';
                 setTimeout(() => {
                     bulkBtn.innerHTML = originalText;
