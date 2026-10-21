@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -35,8 +36,7 @@ def get_menu_items():
 
 def calculate_plan_metrics(days_plan, menu_dict, budget=None):
     """
-    Programmatically calculates and verifies metrics for the 5-day meal plan (Monday to Friday)
-    using exact database values to guarantee strict budget adherence and accurate nutrition.
+    Computes exact database-verified metrics for the AI-planned meals.
     """
     total_cost = 0.0
     total_calories = 0
@@ -60,7 +60,6 @@ def calculate_plan_metrics(days_plan, menu_dict, budget=None):
         # Look up item in menu_dict
         item = menu_dict.get(item_id)
         if not item:
-            # Try finding by name if item_id doesn't match
             name = day_info.get("name", "").strip().lower()
             for m in menu_dict.values():
                 if m["name"].strip().lower() == name:
@@ -68,8 +67,7 @@ def calculate_plan_metrics(days_plan, menu_dict, budget=None):
                     break
         
         if not item:
-            # Fallback to cheapest green item if missing
-            item = next((m for m in menu_dict.values() if 'green' in m['health']), list(menu_dict.values())[0])
+            continue
 
         item_price = float(item["price"])
         total_cost += item_price
@@ -78,7 +76,6 @@ def calculate_plan_metrics(days_plan, menu_dict, budget=None):
         total_carbs += int(item.get("carbs") or 0)
         total_fats += int(item.get("fats") or 0)
 
-        # Health score calculation per meal:
         h = (item.get("health") or "green").lower()
         if "green" in h:
             health_points += pts_per_green
@@ -103,15 +100,14 @@ def calculate_plan_metrics(days_plan, menu_dict, budget=None):
             "fats": item.get("fats") or 0,
             "rating": item.get("rating") or 4.5,
             "category": item.get("category") or "",
-            "reason": day_info.get("reason", "Great nutritional balance")
+            "reason": day_info.get("reason", "Personalized choice based on your preferences.")
         })
 
-    # Add variety bonus (up to 5 points if high variety)
+    # Variety bonus (up to 5 points)
     if variety_count >= min(4, num_days):
         health_points = min(100.0, health_points + 5.0)
     
     weekly_health_score = max(10, min(100, round(health_points)))
-
     
     # Grade determination
     if weekly_health_score >= 85:
@@ -145,59 +141,10 @@ def calculate_plan_metrics(days_plan, menu_dict, budget=None):
         "grade": grade
     }
 
-def enforce_strict_budget(plan_metrics, menu_items, budget):
-    """
-    If the AI plan accidentally exceeded the budget, replace higher-priced items
-    with nutritious lower-priced items from the menu until total_cost <= budget.
-    """
-    if budget is None or plan_metrics["total_cost"] <= budget:
-        return plan_metrics
-    
-    menu_dict = {m["id"]: m for m in menu_items}
-    # Sort candidate substitutes by price ascending
-    cheaper_green_items = sorted(
-        [m for m in menu_items if "green" in m["health"]], 
-        key=lambda x: x["price"]
-    )
-    if not cheaper_green_items:
-        cheaper_green_items = sorted(menu_items, key=lambda x: x["price"])
-        
-    days = list(plan_metrics["days"])
-    
-    # Iterate from most expensive day down
-    attempts = 0
-    while attempts < 20 and sum(d["price"] for d in days) > budget:
-        attempts += 1
-        # Find day with highest price
-        highest_day_idx = max(range(len(days)), key=lambda i: days[i]["price"])
-        current_item = days[highest_day_idx]
-        
-        # Pick a cheaper alternative that is different
-        cheaper = next((sub for sub in cheaper_green_items if sub["price"] < current_item["price"]), None)
-        if not cheaper:
-            break
-            
-        days[highest_day_idx] = {
-            "day": current_item["day"],
-            "item_id": cheaper["id"],
-            "name": cheaper["name"],
-            "price": float(cheaper["price"]),
-            "health": cheaper["health"],
-            "calories": cheaper.get("calories") or 0,
-            "protein": cheaper.get("protein") or 0,
-            "carbs": cheaper.get("carbs") or 0,
-            "fats": cheaper.get("fats") or 0,
-            "rating": cheaper.get("rating") or 4.5,
-            "category": cheaper.get("category") or "",
-            "reason": f"Adjusted to strictly stay within your ₹{budget} weekly budget while keeping healthy greens."
-        }
-
-    return calculate_plan_metrics(days, menu_dict, budget)
-
 def generate_meal_plan(user_message, budget=None, conversation_history=None):
     """
-    Calls Gemini API to generate a personalized conversational weekly meal plan
-    with exactly one food item per day, strictly within budget, drawing from canteen menu items.
+    Calls Gemini AI to dynamically reason, plan, and choose a personalized 5-day meal plan
+    (Monday to Friday) strictly within the user's budget using items from the canteen menu.
     """
     menu_items = get_menu_items()
     menu_dict = {item['id']: item for item in menu_items}
@@ -211,7 +158,6 @@ def generate_meal_plan(user_message, budget=None, conversation_history=None):
             except ValueError:
                 pass
 
-    # Simplified menu summary for LLM prompt
     menu_catalog = []
     for m in menu_items:
         menu_catalog.append({
@@ -223,71 +169,76 @@ def generate_meal_plan(user_message, budget=None, conversation_history=None):
             "protein_g": m["protein"],
             "carbs_g": m["carbs"],
             "fats_g": m["fats"],
-            "category": m["category"]
+            "category": m["category"],
+            "tags": m.get("tags") or ""
         })
 
     system_instruction = f"""
-You are "Compass AI", an expert canteen nutritionist and meal planner for Cafeteria Compass.
-Your task is to converse with the user and provide a 5-day weekly meal plan (Monday to Friday only) based on the canteen's official menu.
+You are "Compass AI", an expert AI canteen nutritionist and meal planner for Cafeteria Compass.
+Your objective is to intelligently analyze the user's request and craft a personalized 5-day meal plan (Monday to Friday only) using the live canteen menu catalog provided below.
 
-CRITICAL RULES:
-1. ONLY USE MENU ITEMS: Every recommended dish MUST be chosen from the provided menu catalog. Use its exact 'id' and 'name'.
-2. EXACTLY ONE FOOD ITEM PER DAY (5 DAYS ONLY: MONDAY TO FRIDAY):
-   - The plan covers ONLY 5 days: Monday, Tuesday, Wednesday, Thursday, Friday.
-   - Strictly DO NOT include Saturday or Sunday.
-   - Each day has EXACTLY ONE meal item (total 5 items).
-   - Do NOT provide separate breakfast, lunch, or dinner. Just 1 item per day.
-3. STRICT BUDGET LIMIT: The total cost of the 5 items MUST BE LESS THAN OR EQUAL TO the user's weekly budget (in ₹).
-   - If budget is specified as ₹{budget or 'unspecified'}, the sum of the 5 meal prices MUST NOT EXCEED ₹{budget or 'user budget'}.
-   - Choose healthy, budget-friendly items if the budget is modest.
-4. USER PREFERENCES: Carefully consider the user's prompt (e.g., veg/non-veg, high protein, low calorie, light foods, specific cravings).
-5. NUTRITIONAL VALUES & HEALTH SCORE:
-   - Provide each item's calories, protein (g), carbs (g), fats (g), and health choice (Green/Amber/Red).
-   - Evaluate a Weekly Health Score (out of 100) and grade (e.g., A+, A, B) based on nutritional balance, proportion of Green Choices, and protein intake.
+CRITICAL INSTRUCTIONS FOR AI PLANNING:
+1. PURE AI PLANNING:
+   - Do NOT use hardcoded templates or canned responses.
+   - You must actively read the user's preferences (e.g. dietary restrictions, high protein, vegetarian, favorite dishes, light lunch, etc.) and tailor the 5 dishes specifically to them.
+2. 5 DAYS ONLY (MONDAY TO FRIDAY):
+   - The plan must have exactly 5 days: Monday, Tuesday, Wednesday, Thursday, Friday.
+   - Do NOT include Saturday or Sunday.
+   - Each day must have exactly 1 food item (total 5 items for the week).
+3. MENU ITEMS ONLY:
+   - Every single dish MUST be selected from the Official Canteen Menu Catalog below. Use its exact "id" and "name".
+   - Do not invent new dishes.
+4. STRICT BUDGET LIMIT:
+   - Weekly budget limit: ₹{budget if budget else "specified by user"}.
+   - The sum of the prices of all 5 chosen dishes MUST be LESS THAN OR EQUAL TO the budget.
+   - Verify your mathematical calculation before finalizing the plan.
+5. HEALTH & NUTRITION:
+   - Provide your genuine AI reasoning for each day's selection based on the user's prompt.
+   - Provide 2-3 tailored nutrition tips.
 6. RESPONSE FORMAT:
-   You must respond in JSON format matching this schema:
+   Return valid JSON with this structure:
    {{
-     "message": "Friendly, encouraging conversational explanation of why this 5-day (Mon-Fri) plan fits the user's prompt and budget.",
+     "message": "<Your personalized, friendly conversational response explaining your plan to the user>",
      "budget": {budget if budget else "null"},
      "plan": [
        {{
          "day": "Monday",
-         "item_id": 1,
-         "name": "Masala Dosa",
-         "reason": "Why this dish was selected for Monday"
+         "item_id": 0,
+         "name": "string",
+         "reason": "string"
        }},
        {{
          "day": "Tuesday",
-         "item_id": 2,
-         "name": "Paneer Butter Masala Meal",
-         "reason": "Why this dish was selected for Tuesday"
+         "item_id": 0,
+         "name": "string",
+         "reason": "string"
        }},
        {{
          "day": "Wednesday",
-         "item_id": 4,
-         "name": "Veg Steamed Momos (6 pcs)",
-         "reason": "Why this dish was selected for Wednesday"
+         "item_id": 0,
+         "name": "string",
+         "reason": "string"
        }},
        {{
          "day": "Thursday",
-         "item_id": 9,
-         "name": "Paneer Tikka Roll",
-         "reason": "Why this dish was selected for Thursday"
+         "item_id": 0,
+         "name": "string",
+         "reason": "string"
        }},
        {{
          "day": "Friday",
-         "item_id": 21,
-         "name": "Student Executive Thali",
-         "reason": "Why this dish was selected for Friday"
+         "item_id": 0,
+         "name": "string",
+         "reason": "string"
        }}
      ],
      "health_tips": [
-       "Helpful tip 1 based on their plan",
-       "Helpful tip 2"
+       "<tip 1>",
+       "<tip 2>"
      ]
    }}
 
-Do not output markdown code fences like ```json. Output raw JSON only.
+Do not include markdown fences like ```json. Return raw JSON only.
 
 OFFICIAL CANTEEN MENU CATALOG:
 {json.dumps(menu_catalog, indent=2)}
@@ -296,109 +247,56 @@ OFFICIAL CANTEEN MENU CATALOG:
     client = genai.Client(api_key=GEMINI_API_KEY)
 
     prompt = f"User Request: {user_message}\n"
-    prompt += "Requirement: Only 5 days from Monday to Friday (Monday, Tuesday, Wednesday, Thursday, Friday). Exactly one food item per day. Do NOT include Saturday or Sunday.\n"
+    prompt += "Please plan meals for 5 days: Monday, Tuesday, Wednesday, Thursday, Friday (1 item per day).\n"
     if budget:
-        prompt += f"Weekly Budget: ₹{budget} (Strict maximum for 5 days Mon-Fri, sum of 5 items must be <= ₹{budget})\n"
+        prompt += f"Weekly Budget: ₹{budget} (Strict maximum total for all 5 days <= ₹{budget})\n"
 
-    # Add conversation history context if provided
-    history_context = ""
     if conversation_history and len(conversation_history) > 0:
         history_context = "Previous Conversation:\n"
         for msg in conversation_history[-6:]:
             history_context += f"{msg.get('role', 'user').capitalize()}: {msg.get('content', '')}\n"
         prompt = history_context + "\n" + prompt
 
-    response_text = ""
     parsed_json = None
+    last_error = None
 
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.3,
-                response_mime_type="application/json"
-            )
-        )
-        response_text = response.text.strip()
-        parsed_json = json.loads(response_text)
-    except Exception as e:
-        print(f"Gemini API error: {e}")
+    # Retry loop with backoff for API resilience
+    for attempt in range(3):
         try:
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.4,
+                    response_mime_type="application/json"
+                )
+            )
+            response_text = response.text.strip()
+            # Clean possible markdown wrap
             cleaned = re.sub(r'^```json\s*', '', response_text)
             cleaned = re.sub(r'```$', '', cleaned).strip()
             parsed_json = json.loads(cleaned)
-        except Exception:
-            parsed_json = None
+            if parsed_json and "plan" in parsed_json and len(parsed_json["plan"]) >= 5:
+                break
+        except Exception as e:
+            last_error = e
+            time.sleep(1.0 * (attempt + 1))
 
-
-
-    # If parsing failed or no plan was returned, generate a smart fallback plan from menu items
     if not parsed_json or "plan" not in parsed_json or len(parsed_json["plan"]) < 5:
-        parsed_json = create_rule_based_plan(user_message, budget, menu_items)
+        raise RuntimeError(f"Gemini AI was unable to generate the meal plan: {last_error}")
 
-    # Extract days plan from response (ensure only Monday to Friday, max 5 days)
     valid_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
     raw_days = [d for d in parsed_json.get("plan", []) if d.get("day") in valid_days][:5]
-    if len(raw_days) < 5:
-        raw_days = create_rule_based_plan(user_message, budget, menu_items)["plan"]
-    
-    # Calculate exact database metrics
-    plan_metrics = calculate_plan_metrics(raw_days, menu_dict, budget)
 
-    # Strictly enforce budget limit
-    if budget is not None and plan_metrics["total_cost"] > budget:
-        plan_metrics = enforce_strict_budget(plan_metrics, menu_items, budget)
+    plan_metrics = calculate_plan_metrics(raw_days, menu_dict, budget)
 
     return {
         "success": True,
-        "message": parsed_json.get("message", "Here is your personalized 5-day canteen meal plan (Monday to Friday) tailored to your budget and preferences!"),
+        "message": parsed_json.get("message", "Here is your 5-day meal plan from Monday to Friday tailored specifically to your request and budget!"),
         "health_tips": parsed_json.get("health_tips", [
-            "Opt for Green Choice items for steady energy throughout the work & study week.",
+            "Balanced meals with green choices help maintain consistent energy levels for study and work.",
             "Stay hydrated alongside your daily canteen meal."
         ]),
         "plan_metrics": plan_metrics
     }
-
-def create_rule_based_plan(user_message, budget, menu_items):
-    """Fallback generator to construct a 5-day plan (Monday to Friday) strictly within budget."""
-    is_veg_only = "veg" in user_message.lower() and "non-veg" not in user_message.lower()
-    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-
-    filtered_items = menu_items
-    if is_veg_only:
-        filtered_items = [m for m in menu_items if "veg" in (m.get("tags") or "").lower() and "non-veg" not in (m.get("tags") or "").lower()]
-
-    if not filtered_items:
-        filtered_items = menu_items
-
-    # Sort primarily by health (green first) and price
-    green_items = [m for m in filtered_items if "green" in m["health"]]
-    pool = green_items if green_items else filtered_items
-
-    max_daily_budget = (budget / 5.0) if budget else 100.0
-    affordable_pool = [m for m in pool if m["price"] <= max_daily_budget * 1.3]
-    if not affordable_pool:
-        affordable_pool = sorted(filtered_items, key=lambda x: x["price"])[:5]
-
-    plan = []
-    for i, day in enumerate(days):
-        selected = affordable_pool[i % len(affordable_pool)]
-        plan.append({
-            "day": day,
-            "item_id": selected["id"],
-            "name": selected["name"],
-            "reason": f"Nutritious {selected['health'].capitalize()} Choice packed with {selected.get('protein', 0)}g protein."
-        })
-
-    return {
-        "message": f"I've tailored a balanced 5-day meal plan (Monday to Friday) strictly staying within your weekly budget of ₹{budget or 'the canteen standards'}, with one healthy item per day.",
-        "budget": budget,
-        "plan": plan,
-        "health_tips": [
-            "Balanced meals with green choices help maintain consistent energy levels for study and work.",
-            "Pair these with plenty of water for optimal nutrition."
-        ]
-    }
-
